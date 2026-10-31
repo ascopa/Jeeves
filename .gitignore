@@ -1,0 +1,9 @@
+.idea/
+.vscode/
+.DS_Store
+.env
+*.test
+*.out
+.venv/
+__pycache__/
+.pytest_cache/

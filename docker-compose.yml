@@ -1,0 +1,172 @@
+x-service-env: &service-env
+  GIN_MODE: release
+  DB_DSN: postgres://jeeves:jeeves@postgres:5432/jeeves?sslmode=disable
+  DB_STATEMENT_TIMEOUT: ${DB_STATEMENT_TIMEOUT:-2s}
+
+x-service-healthcheck: &service-healthcheck
+  test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$$HTTP_PORT/health || exit 1"]
+  interval: 2s
+  timeout: 3s
+  retries: 30
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    command: ["postgres", "-c", "max_connections=200"]
+    environment:
+      POSTGRES_DB: jeeves
+      POSTGRES_USER: jeeves
+      POSTGRES_PASSWORD: jeeves
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./infra/db/initdb.d:/docker-entrypoint-initdb.d:ro
+      - jeeves-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jeeves -d jeeves"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  search-event-service:
+    build: ./src/search-event-service
+    healthcheck: *service-healthcheck
+    environment:
+      <<: *service-env
+      HTTP_PORT: "8081"
+      DB_MAX_CONNS: "20"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  booking-service:
+    build: ./src/booking-service
+    healthcheck: *service-healthcheck
+    deploy:
+      replicas: 2
+    environment:
+      <<: *service-env
+      HTTP_PORT: "8082"
+      DB_MAX_CONNS: "20"
+      HOLD_TTL: ${HOLD_TTL:-10m}
+      MAX_HOLDS_PER_EVENT: ${MAX_HOLDS_PER_EVENT:-4}
+      ADMISSION_SECRET: ${ADMISSION_SECRET:-dev-only-admission-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  checkout-service:
+    build: ./src/checkout-service
+    healthcheck: *service-healthcheck
+    environment:
+      <<: *service-env
+      HTTP_PORT: "8083"
+      DB_MAX_CONNS: "20"
+      CARD_PROVIDER_URL: http://card-provider-mock:9090
+      CARD_PROVIDER_API_KEY: ${CARD_PROVIDER_API_KEY:-dev-only-provider-key}
+      WAITING_ROOM_URL: http://waiting-room-service:8084
+    depends_on:
+      postgres:
+        condition: service_healthy
+      card-provider-mock:
+        condition: service_healthy
+
+  waiting-room-service:
+    build: ./src/waiting-room-service
+    healthcheck: *service-healthcheck
+    deploy:
+      replicas: 2
+    environment:
+      <<: *service-env
+      HTTP_PORT: "8084"
+      DB_MAX_CONNS: "5"
+      REDIS_ADDR: redis:6379
+      ADMISSION_SECRET: ${ADMISSION_SECRET:-dev-only-admission-secret}
+      ADMISSION_TTL: ${ADMISSION_TTL:-15m}
+      ADMIT_SEATS_FACTOR: ${ADMIT_SEATS_FACTOR:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  card-provider-mock:
+    build: ./src/utils/card-provider-mock
+    healthcheck: *service-healthcheck
+    ports:
+      - "9090:9090"
+    environment:
+      GIN_MODE: release
+      HTTP_PORT: "9090"
+      CARD_PROVIDER_API_KEY: ${CARD_PROVIDER_API_KEY:-dev-only-provider-key}
+
+  gateway:
+    image: nginx:1.27.5-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./infra/gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      search-event-service:
+        condition: service_healthy
+      booking-service:
+        condition: service_healthy
+      checkout-service:
+        condition: service_healthy
+      waiting-room-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          for s in search_event_service booking_service checkout_service waiting_room_service;
+          do wget -q -O /dev/null http://127.0.0.1/health/$$s || exit 1; done
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  newman:
+    image: postman/newman:6.1.3-alpine
+    profiles: ["tools"]
+    volumes:
+      - ./postman:/etc/newman:ro
+    command:
+      - run
+      - jeeves.postman_collection.json
+      - --env-var
+      - baseUrl=http://gateway
+      - --env-var
+      - cardProviderUrl=http://card-provider-mock:9090
+    depends_on: &tools-depend-on-stack
+      gateway:
+        condition: service_healthy
+      card-provider-mock:
+        condition: service_healthy
+
+  queue-demo:
+    build: ./scripts
+    profiles: ["tools"]
+    environment: &test-clients-env
+      GATEWAY_URL: http://gateway
+      CARD_PROVIDER_URL: http://card-provider-mock:9090
+      PGHOST: postgres
+      PGPORT: "5432"
+    depends_on: *tools-depend-on-stack
+
+  integration-tests:
+    build: ./integration-tests
+    profiles: ["tools"]
+    environment: *test-clients-env
+    depends_on: *tools-depend-on-stack
+
+volumes:
+  jeeves-pgdata:

@@ -1,0 +1,1010 @@
+{
+  "info": {
+    "name": "Jeeves demo",
+    "description": "The user journey through the gateway: search, wait in line, see the seats, hold one, tokenize a card and check out. Run the folders in order, or the whole collection. Requests identify the user with the X-User-Id header: userId is Ada and otherUserId is Alan, from the seed.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-User-Id",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{userId}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "cardProviderUrl",
+      "value": "http://localhost:9090"
+    },
+    {
+      "key": "userId",
+      "value": "11111111-1111-1111-1111-111111111111",
+      "description": "Ada, from the seed"
+    },
+    {
+      "key": "otherUserId",
+      "value": "22222222-2222-2222-2222-222222222222",
+      "description": "Alan, from the seed"
+    },
+    {
+      "key": "eventId",
+      "value": ""
+    },
+    {
+      "key": "ticketId",
+      "value": ""
+    },
+    {
+      "key": "soldTicketId",
+      "value": ""
+    },
+    {
+      "key": "paymentToken",
+      "value": ""
+    },
+    {
+      "key": "idempotencyKey",
+      "value": ""
+    },
+    {
+      "key": "admissionToken",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Open event",
+      "description": "The whole purchase for an event without a waiting room: Jazz Sessions.",
+      "item": [
+        {
+          "name": "Search \"jazz\"",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/search?name=jazz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "jazz"
+                }
+              ]
+            },
+            "description": "Finds events whose name contains the text. Saves the first match as {{eventId}} (Jazz Sessions)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const [event] = pm.response.json().events;",
+                  "pm.test('found the event', () => pm.expect(event).to.be.an('object'));",
+                  "pm.collectionVariables.set('eventId', event.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "See the seats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}/seats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{eventId}}",
+                "seats"
+              ]
+            },
+            "description": "Every seat with its status. Saves the first available one as {{ticketId}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const seat = pm.response.json().tickets.find(t => t.status === 'available');",
+                  "pm.test('has an available seat', () => pm.expect(seat).to.be.an('object'));",
+                  "pm.collectionVariables.set('ticketId', seat.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Book the seat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/book",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "book"
+              ]
+            },
+            "description": "Holds {{ticketId}} for 10 minutes. A seat can only be held by one user, and a user can hold at most 4 seats per event.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticketId}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('held', () => pm.expect(pm.response.json().status).to.eql('booked'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tokenize a card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{cardProviderUrl}}/tokens",
+              "host": [
+                "{{cardProviderUrl}}"
+              ],
+              "path": [
+                "tokens"
+              ]
+            },
+            "description": "Sends the card to the card provider, not to Jeeves, and saves the returned {{paymentToken}}. 4242424242424242 approves.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pan\": \"4242424242424242\",\n  \"expMonth\": 12,\n  \"expYear\": 2030,\n  \"cvv\": \"123\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('paymentToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check out",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout"
+              ]
+            },
+            "description": "Charges the card and marks the seat sold. Generates a new {{idempotencyKey}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticketId}}\",\n  \"paymentToken\": \"{{paymentToken}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('sold', () => pm.expect(pm.response.json().status).to.eql('sold'));",
+                  "pm.collectionVariables.set('lastPurchase', pm.response.text());",
+                  "pm.collectionVariables.set('soldTicketId', pm.collectionVariables.get('ticketId'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check out again with the same key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout"
+              ]
+            },
+            "description": "Retrying with the same Idempotency-Key returns the first outcome instead of charging again.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticketId}}\",\n  \"paymentToken\": \"{{paymentToken}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('same purchase', () => pm.expect(pm.response.json()).to.eql(JSON.parse(pm.collectionVariables.get('lastPurchase'))));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Queued event",
+      "description": "The same purchase for an event behind the waiting room: Rock en el Parque, which admits 2 users per second.",
+      "item": [
+        {
+          "name": "Search \"parque\"",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/search?name=parque",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "parque"
+                }
+              ]
+            },
+            "description": "Finds events whose name contains the text. Saves the first match as {{eventId}} (Rock en el Parque)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const [event] = pm.response.json().events;",
+                  "pm.test('found the event', () => pm.expect(event).to.be.an('object'));",
+                  "pm.collectionVariables.set('eventId', event.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "See the seats without admission",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}/seats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{eventId}}",
+                "seats"
+              ]
+            },
+            "description": "A queued event's seat map needs an admission token: 403 admission_required."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "pm.test('admission_required', () => pm.expect(pm.response.json().error).to.eql('admission_required'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Join the queue",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/queue/{{eventId}}/join",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "queue",
+                "{{eventId}}",
+                "join"
+              ]
+            },
+            "description": "Takes a place in the queue. Joining again keeps it."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('has a position', () => pm.expect(pm.response.json().position).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check the queue status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/queue/{{eventId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "queue",
+                "{{eventId}}",
+                "status"
+              ]
+            },
+            "description": "Position, people ahead and an estimated wait, until the user is admitted. Then it saves {{admissionToken}}, valid for 15 minutes."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const wait = Number(pm.collectionVariables.get('retryAfter') || 0);",
+                  "pm.collectionVariables.unset('retryAfter');",
+                  "if (wait > 0) { setTimeout(() => {}, wait * 1000); }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "if (body.status === 'admitted') {",
+                  "  pm.collectionVariables.set('admissionToken', body.admissionToken);",
+                  "  pm.collectionVariables.unset('polls');",
+                  "} else if (body.status === 'waiting') {",
+                  "  const polls = Number(pm.collectionVariables.get('polls') || 0) + 1;",
+                  "  pm.collectionVariables.set('polls', polls);",
+                  "  pm.test('admitted within 30 polls', () => pm.expect(polls).to.be.below(30));",
+                  "  if (polls < 30) {",
+                  "    pm.collectionVariables.set('retryAfter', Number(pm.response.headers.get('Retry-After') || 1));",
+                  "    pm.execution.setNextRequest(pm.info.requestName);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "See the seats with admission",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Admission-Token",
+                "value": "{{admissionToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}/seats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{eventId}}",
+                "seats"
+              ]
+            },
+            "description": "The same seat map, now with the Admission-Token header. Saves the first available seat as {{ticketId}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const seat = pm.response.json().tickets.find(t => t.status === 'available');",
+                  "pm.test('has an available seat', () => pm.expect(seat).to.be.an('object'));",
+                  "pm.collectionVariables.set('ticketId', seat.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Book the seat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Admission-Token",
+                "value": "{{admissionToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/book",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "book"
+              ]
+            },
+            "description": "Holds {{ticketId}} for 10 minutes. A seat can only be held by one user, and a user can hold at most 4 seats per event.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticketId}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('held', () => pm.expect(pm.response.json().status).to.eql('booked'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tokenize a card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{cardProviderUrl}}/tokens",
+              "host": [
+                "{{cardProviderUrl}}"
+              ],
+              "path": [
+                "tokens"
+              ]
+            },
+            "description": "Sends the card to the card provider, not to Jeeves, and saves the returned {{paymentToken}}. 4242424242424242 approves.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pan\": \"4242424242424242\",\n  \"expMonth\": 12,\n  \"expYear\": 2030,\n  \"cvv\": \"123\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('paymentToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check out",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout"
+              ]
+            },
+            "description": "Charges the card, marks the seat sold, and frees the user's place in the waiting room for the next person in line.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticketId}}\",\n  \"paymentToken\": \"{{paymentToken}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('sold', () => pm.expect(pm.response.json().status).to.eql('sold'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. When things go wrong",
+      "description": "Run after folder 1: it tries to book the seat bought there, then pays for another seat with a card that declines.",
+      "item": [
+        {
+          "name": "Book a sold seat (as another user)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/book",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "book"
+              ]
+            },
+            "description": "The seat bought in folder 1, requested by Alan: 409 ticket_unavailable.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{soldTicketId}}\"\n}"
+            },
+            "auth": {
+              "type": "apikey",
+              "apikey": [
+                {
+                  "key": "key",
+                  "value": "X-User-Id",
+                  "type": "string"
+                },
+                {
+                  "key": "value",
+                  "value": "{{otherUserId}}",
+                  "type": "string"
+                },
+                {
+                  "key": "in",
+                  "value": "header",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 409', () => pm.response.to.have.status(409));",
+                  "pm.test('ticket_unavailable', () => pm.expect(pm.response.json().error).to.eql('ticket_unavailable'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Search \"jazz\"",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/search?name=jazz",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "jazz"
+                }
+              ]
+            },
+            "description": "Finds events whose name contains the text. Saves the first match as {{eventId}} (Jazz Sessions)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const [event] = pm.response.json().events;",
+                  "pm.test('found the event', () => pm.expect(event).to.be.an('object'));",
+                  "pm.collectionVariables.set('eventId', event.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "See the seats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{eventId}}/seats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{eventId}}",
+                "seats"
+              ]
+            },
+            "description": "Saves the next available seat as {{ticketId}}."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const seat = pm.response.json().tickets.find(t => t.status === 'available');",
+                  "pm.test('has an available seat', () => pm.expect(seat).to.be.an('object'));",
+                  "pm.collectionVariables.set('ticketId', seat.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Book the seat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/book",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "book"
+              ]
+            },
+            "description": "Holds {{ticketId}} for 10 minutes. A seat can only be held by one user, and a user can hold at most 4 seats per event.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticketId}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('held', () => pm.expect(pm.response.json().status).to.eql('booked'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tokenize a card that declines",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{cardProviderUrl}}/tokens",
+              "host": [
+                "{{cardProviderUrl}}"
+              ],
+              "path": [
+                "tokens"
+              ]
+            },
+            "description": "4000000000000002 is the provider's test card that always declines.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pan\": \"4000000000000002\",\n  \"expMonth\": 12,\n  \"expYear\": 2030,\n  \"cvv\": \"123\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('paymentToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check out with the declined card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout"
+              ]
+            },
+            "description": "402 payment_declined. The hold stays, so the user can try another card with a new key.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticketId}}\",\n  \"paymentToken\": \"{{paymentToken}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 402', () => pm.response.to.have.status(402));",
+                  "pm.test('payment_declined', () => pm.expect(pm.response.json().error).to.eql('payment_declined'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tokenize a card that approves",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{cardProviderUrl}}/tokens",
+              "host": [
+                "{{cardProviderUrl}}"
+              ],
+              "path": [
+                "tokens"
+              ]
+            },
+            "description": "Sends the card to the card provider, not to Jeeves, and saves the returned {{paymentToken}}. 4242424242424242 approves.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pan\": \"4242424242424242\",\n  \"expMonth\": 12,\n  \"expYear\": 2030,\n  \"cvv\": \"123\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('paymentToken', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Check out with another card",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "checkout"
+              ]
+            },
+            "description": "The same seat, a new card and a new key: sold.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ticketId\": \"{{ticketId}}\",\n  \"paymentToken\": \"{{paymentToken}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('idempotencyKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('sold', () => pm.expect(pm.response.json().status).to.eql('sold'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
